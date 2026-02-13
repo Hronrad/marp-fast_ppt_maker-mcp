@@ -1,0 +1,14 @@
+{
+  "name": "marp-fast-ppt-maker-mcp",
+  "version": "1.0.0",
+  "description": "MCP server for generating PPTX presentations using Marp",
+  "scripts": {
+    "start": "python -u server.py"
+  },
+  "dependencies": {
+    "@marp-team/marp-cli": "^4.2.0"
+  },
+  "devDependencies": {
+    "@modelcontextprotocol/inspector": "latest"
+  }
+}
