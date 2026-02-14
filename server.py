@@ -7,21 +7,42 @@ from typing import Literal
 from mcp.server.fastmcp import FastMCP
 from playwright.async_api import async_playwright
 
-mcp = FastMCP("Marp-PPT-Agent")
+mcp = FastMCP("Marp-fast PPT maker-Agent")
 
 def find_browser_path():
-    paths = [
-        "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
-        "/Applications/Microsoft Edge.app/Contents/MacOS/Microsoft Edge"
-    ]
+    """跨平台浏览器路径探测"""
+    if sys.platform == "win32":
+        paths = [
+            os.path.expandvars(r"%ProgramFiles%\Google\Chrome\Application\chrome.exe"),
+            os.path.expandvars(r"%ProgramFiles(x86)%\Google\Chrome\Application\chrome.exe"),
+            os.path.expandvars(r"%LocalAppData%\Google\Chrome\Application\chrome.exe"),
+            os.path.expandvars(r"%ProgramFiles%\Microsoft\Edge\Application\msedge.exe"),
+            os.path.expandvars(r"%ProgramFiles(x86)%\Microsoft\Edge\Application\msedge.exe"),
+        ]
+    elif sys.platform == "darwin":
+        paths = [
+            "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
+            "/Applications/Microsoft Edge.app/Contents/MacOS/Microsoft Edge"
+        ]
+    else:  # Linux 及其他
+        paths = [
+            "/usr/bin/google-chrome",
+            "/usr/bin/google-chrome-stable",
+            "/usr/bin/microsoft-edge-stable",
+            "/usr/bin/microsoft-edge"
+        ]
+        
     for p in paths:
         if os.path.exists(p):
             return p
     return None
 
 def find_marp_executable():
-    local_marp = os.path.abspath(os.path.join(os.getcwd(), "node_modules", ".bin", "marp"))
-    if os.path.exists(local_marp):
+    """跨平台 Marp 执行文件探测"""
+    local_marp_dir = os.path.abspath(os.path.join(os.getcwd(), "node_modules", ".bin"))
+    # shutil.which 会在 Windows 下自动补全 .cmd/.exe 后缀
+    local_marp = shutil.which("marp", path=local_marp_dir)
+    if local_marp:
         return local_marp
     return shutil.which("marp")
 
@@ -192,14 +213,22 @@ class EngineSplitter:
         with open(probe_md_file, "w", encoding="utf-8") as f:
             f.write(probe_md)
             
+            # 构建基础命令
+        cmd = [marp_bin, probe_md_file, "-o", probe_html_file, "--html", "--allow-local-files"]
+        
+        # 核心修改：挂载本地 themes 文件夹
+        themes_dir = os.path.join(base_dir, "themes")
+        if os.path.exists(themes_dir):
+            cmd.extend(["--theme-set", themes_dir])
+
         proc = await asyncio.create_subprocess_exec(
-            marp_bin, probe_md_file, "-o", probe_html_file, "--html", "--allow-local-files",
+            *cmd,  # 使用解包传入命令数组
             stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE, stdin=asyncio.subprocess.DEVNULL, env=env
         )
         await proc.communicate()
         
         sys.stderr.write("DEBUG: [Two-Pass] 阶段2 - Chromium 物理测距...\n")
-        from playwright.async_api import async_playwright
+
         async with async_playwright() as p:
             browser = await p.chromium.launch(headless=True, executable_path=env.get("CHROME_PATH"))
             page = await browser.new_page()
@@ -260,17 +289,33 @@ class EngineSplitter:
 
         return "\n".join(final_lines)
     
-    
-# 核心修复4：将 MCP 接口设定为 async def
+
 @mcp.tool()
 async def create_presentation(
     title: str,
     content: str,
-    theme: Literal["default", "gaia", "uncover"] = "default",
-    style_class: str = "lead",
+    theme: str = "default",
+    style_class: str = "",
     auto_split: bool = True 
 ) -> str:
-    """将 Markdown 内容转换为 PPTX 和 PDF。采用双重渲染确保物理高度精准。"""
+    """
+    一键将文档转为 ppt 展示的绝佳工具。自动为 Markdown 内容添加分隔符，并通过 Marp 转为 PPTX 和 PDF。采用双重渲染确保物理高度精准，智能精确切分以获得最佳的阅读体验。非常适合需要快速从文本生成专业演示文稿的用户，涵盖小组汇报、学术报告、内容分享等场景。
+    
+    【LLM 模板选择指南】请严格根据用户提供的内容主题，自动为 theme 参数选择最合适的选项：
+    - "default": 小字体，基础简洁白底黑字，兼容性最好。
+    - "gaia": 中等字体，带有暖色调和自然气息，对比度低。建议用于：人文社科、艺术设计、环保生态、生活方式类轻松主题。
+    - "uncover": 超大字体，极简主义，对比度高，视觉冲击力强。建议用于：产品发布会、TED式个人演讲、创意Pitch、大图为主的视觉展示。
+    - "academic": 中等字体，红色标题。需注意其为右对齐，仅当特定条件下使用。
+    - "beam": 小字体，仿 Latex 中的 Beamer 主题，适合学术类内容，但需注意其对长标题和复杂元素的兼容性较差。
+    - "rose-pine-dawn": 小字体，浅色背景，淡雅富有美感，适合科技人文多种领域。
+    - "rose-pine-moon": 小字体，暗色背景，神秘优雅，适合需要暗色背景展示的情形。
+    - "rose-pine-dawn-modern": 中等字体，在 rose-pine-dawn 的基础上增加了现代化元素的卡片式标题展示。
+
+    【style_class 参数说明】请根据用户的内容展示需求，选择是否填入特定的 style_class 来调整整体风格：
+    - "": 默认风格，无需额外样式类，适合大多数
+    - "lead": 类似 uncover 的居中标题排版。
+    - "invert": 反转色彩，适合需要暗色背景的展示。
+    """
     marp_bin = find_marp_executable()
     if not marp_bin:
         return "❌ 错误: 找不到 Marp。"
@@ -280,7 +325,9 @@ async def create_presentation(
 
     env = os.environ.copy()
     env["CHROME_PATH"] = browser_path
-    env["PATH"] = "/usr/local/bin:/opt/homebrew/bin:" + env.get("PATH", "")
+    # 仅在非 Windows 系统下追加特定的 bin 目录，防止破坏 Windows 的 PATH 结构
+    if sys.platform != "win32":
+        env["PATH"] = "/usr/local/bin:/opt/homebrew/bin:" + env.get("PATH", "")
 
     # --- 逻辑层 ---
     final_content = content.strip()
@@ -327,6 +374,11 @@ async def create_presentation(
     # 核心修复6：使用纯异步的方式调用最终生成命令
     async def run_marp_async(output_path, format_flag):
         cmd = [marp_bin, md_file, "-o", output_path, "--allow-local-files"]
+
+        themes_dir = os.path.join(base_dir, "themes")
+        if os.path.exists(themes_dir):
+            cmd.extend(["--theme-set", themes_dir])
+
         try:
             proc = await asyncio.create_subprocess_exec(
                 *cmd,

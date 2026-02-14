@@ -1,1 +1,2 @@
-mcp-server-fastmcp>=0.1.0
+mcp
+playwright

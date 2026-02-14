@@ -1,0 +1,759 @@
+/* @theme rose-pine-dawn-modern */
+/*
+Modern Card-style Rosé Pine Dawn theme - 现代卡片式设计版本
+Based on Rosé Pine theme by RAINBOWFLESH
+Enhanced with modern card design, rich shadows, and contemporary aesthetics
+*/
+
+@import "default";
+@import "schema";
+@import "structure";
+
+
+
+/* ============================================================================
+   1. 基础变量和根样式 (Base Variables & Root Styles)
+   ===========================================================================*/
+
+:root {
+    /* 核心颜色变量 (Core Color Variables) */
+    --base: #fffaf3;
+    --surface: #fffaf3;
+    --overlay: #f2e9e1;
+    --muted: #9893a5;
+    --subtle: #797593;
+    --text: #575279;
+    --love: #b4637a;
+    --gold: #ea9d34;
+    --brown: #aa7428;
+    --rose: #d7827e;
+    --pine: #286983;
+    --foam: #56949f;
+    --iris: #907aa9;
+    --highlight-low: #eee;
+    --highlight-muted: #ecebeb;
+    --highlight-high: #cecacd;
+
+    /* 数学颜色变量 (Math Color Variables) - 对应slides.md中的颜色定义 */
+    --math-red: #cb8680;      /* \red 对应颜色 */
+    --math-green: #4f8d63;    /* \green 对应颜色 */
+    --math-gray: #808080;     /* \gray 对应颜色 */
+    --math-purple: #B189C6;   /* \purple 对应颜色 */
+    --math-orange: #dfa04b;   /* \orange 对应颜色 */
+    --math-white: #ffffff;    /* \white 对应颜色 */
+    --math-blue: #3470BF;     /* \blue 对应颜色 - rgb(0.20, 0.43, 0.75) */
+    --math-yellow: #FBE9F2;   /* \yellow 对应颜色 - rgb(0.984375, 0.9140625, 0.62109375) */
+
+    /* 现代设计系统变量 (Modern Design System Variables) */
+    --card-bg: rgba(255, 255, 255, 0.9);
+    --card-bg-secondary: rgba(250, 244, 237, 0.95);
+    --card-border: rgba(215, 130, 126, 0.15);
+    --card-border-hover: rgba(215, 130, 126, 0.25);
+    
+    /* 阴影系统 (Shadow System) */
+    --shadow-subtle: 0 2px 12px rgba(87, 82, 121, 0.08);
+    --shadow-medium: 0 4px 20px rgba(87, 82, 121, 0.12);
+    --shadow-strong: 0 8px 40px rgba(87, 82, 121, 0.15);
+    --shadow-focus: 0 0 0 3px rgba(215, 130, 126, 0.25);
+    
+    /* 边框圆角系统 (Border Radius System) */
+    --border-radius: 13px;
+    --border-radius-small: 8px;
+    
+    /* 间距系统 (Spacing System) */
+    --spacing-unit: 8px;
+
+    /* 全局字体和背景 (Global Font & Background) */
+    font-family: 'Inter', 'SF Pro Display', 'Segoe UI', -apple-system, 
+        BlinkMacSystemFont, Roboto, "Helvetica Neue", Arial, sans-serif;
+    font-weight: 400;
+    background: linear-gradient(150deg, var(--surface) 0%, var(--base) 100%);
+    line-height: 1.7;
+}
+
+/* ============================================================================
+   2. 布局和容器 (Layout & Containers)
+   ===========================================================================*/
+
+/* 幻灯片容器 - 全屏显示优化 (Slide Container - Fullscreen Optimized) */
+section {
+    background: var(--card-bg);
+    border: none;
+    border-radius: 0;
+    box-shadow: none;
+    padding: calc(var(--spacing-unit) * 8);
+    margin: 0;
+    position: relative;
+    overflow: hidden;
+    width: 100%;
+    height: 100%;
+    box-sizing: border-box;
+}
+
+
+/* 背景纹理叠加 (Background Pattern Overlay) */
+section::before {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background: 
+        radial-gradient(circle at 20% 20%, rgba(215, 130, 126, 0.03) 0%, transparent 50%),
+        radial-gradient(circle at 80% 80%, rgba(144, 122, 169, 0.03) 0%, transparent 50%);
+    pointer-events: none;
+    z-index: -1;
+}
+
+/* 两栏布局 (Two Column Layout) */
+div.twocols {
+    margin-top: calc(var(--spacing-unit) * 6);
+    column-count: 2;
+    column-gap: calc(var(--spacing-unit) * 8);
+    column-rule: 1px solid var(--highlight-high);
+}
+
+div.twocols p:first-child, 
+div.twocols h1:first-child, 
+div.twocols h2:first-child, 
+div.twocols ul:first-child, 
+div.twocols ul li:first-child, 
+div.twocols ul li p:first-child {
+    margin-top: 0 !important;
+}
+
+div.twocols p.break {
+    break-before: column;
+    margin-top: 0;
+}
+
+/* ============================================================================
+   3. 排版系统 (Typography System)
+   ===========================================================================*/
+
+/* 主标题 (Primary Heading) */
+h1 {
+    color: var(--rose);
+    font-size: 64px;
+    font-weight: 800;
+    padding-bottom: calc(var(--spacing-unit) * 2);
+    letter-spacing: -0.02em;
+}
+
+/* 二级标题 (Secondary Heading) */
+h2 {
+    color: var(--rose);
+    font-size: 48px;
+    font-weight: 700;
+    margin-bottom: calc(var(--spacing-unit) * 4);
+    padding: calc(var(--spacing-unit) * 2) calc(var(--spacing-unit) * 3);
+    background: linear-gradient(135deg, var(--highlight-low), rgba(255, 255, 255, 0.9));
+    border-radius: var(--border-radius-small);
+    border-left: 4px solid var(--rose);
+    box-shadow: var(--shadow-subtle);
+    letter-spacing: -0.01em;
+}
+
+/* 三级标题 (Tertiary Heading) */
+h3 {
+    color: var(--gold);
+    font-size: 35px;
+    font-weight: 600;
+    margin: calc(var(--spacing-unit) * 1) 0;
+    padding: calc(var(--spacing-unit) * 1) calc(var(--spacing-unit) * 2);
+    background: rgba(234, 157, 52, 0.08);
+    border-radius: var(--border-radius-small);
+    border-bottom: 2px solid var(--highlight-muted);
+    backdrop-filter: blur(5px);
+}
+
+/* 四级及以下标题 (Lower Level Headings) */
+h4, h5, h6 {
+    color: var(--iris);
+    font-weight: 600;
+    margin-bottom: calc(var(--spacing-unit) * 2);
+}
+
+
+p code {
+    color: var(--muted);
+}
+
+/* 强调文本 (Strong Text) */
+strong {
+    font-weight: 700;
+}
+
+strong svg, 
+ul li strong, 
+ul li strong svg, 
+blockquote ul li strong svg, 
+.proof p strong {
+    color: var(--brown);
+}
+
+/* 链接 (Links) */
+a {
+    color: var(--iris);
+    text-decoration: none;
+    position: relative;
+    padding: calc(var(--spacing-unit) / 2) var(--spacing-unit);
+    border-radius: var(--border-radius-small);
+    transition: all 0.3s ease;
+    background: rgba(144, 122, 169, 0.05);
+    border: 1px solid transparent;
+}
+
+a:hover {
+    color: var(--love);
+    background: rgba(180, 99, 122, 0.1);
+    border-color: var(--love);
+    box-shadow: var(--shadow-focus);
+}
+
+/* ============================================================================
+   4. 列表系统 (List System)
+   ===========================================================================*/
+
+/* 列表容器 (List Container) */
+ul {
+    padding: 0;
+    margin-bottom: calc(var(--spacing-unit) * 4);
+    list-style: none;
+}
+
+/* 主要列表项 (Primary List Items) */
+li {
+    color: var(--text);
+    padding: calc(var(--spacing-unit) * 3) calc(var(--spacing-unit) * 4);
+    border-radius: var(--border-radius-small);
+    box-shadow: var(--shadow-subtle);
+    position: relative;
+}
+
+/* 第一层列表项图标 (First Level List Item Icons) */
+li::before {
+    content: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' viewBox='0 0 16 16'%3E%3Cdefs%3E%3ClinearGradient id='ring-gradient' x1='0%25' y1='0%25' x2='100%25' y2='100%25'%3E%3Cstop offset='0%25' style='stop-color:%23d7827e;stop-opacity:1' /%3E%3Cstop offset='50%25' style='stop-color:%23907aa9;stop-opacity:1' /%3E%3Cstop offset='100%25' style='stop-color:%2356949f;stop-opacity:1' /%3E%3C/linearGradient%3E%3C/defs%3E%3Ccircle cx='8' cy='8' r='6' fill='none' stroke='url(%23ring-gradient)' stroke-width='2.5'/%3E%3Ccircle cx='8' cy='8' r='2' fill='url(%23ring-gradient)' opacity='0.6'/%3E%3C/svg%3E");
+    position: absolute;
+    left: calc(var(--spacing-unit) * 0);
+    top: calc(var(--spacing-unit) * (-0.3));
+    display: block;
+}
+
+/* 嵌套列表容器 (Nested List Container) */
+
+section > ul > li {
+    margin: 10px 0px;
+}
+
+/* 嵌套列表项图标 (Nested List Item Icons) */
+ul ul li::before {
+    content: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12'%3E%3Ccircle cx='6' cy='6' r='5' fill='%23797593' opacity='0.7'/%3E%3C/svg%3E");
+}
+
+/* 列表项内容样式 (List Item Content Styles) */
+ul li, ul li p, p {
+    font-size: 32px;
+    font-weight: 400;
+    color: var(--text);
+    background: transparent;
+    box-shadow: none;
+    padding-left: calc(var(--spacing-unit) * 2);
+    padding-right: 0;
+    padding-top: 0px;
+    padding-bottom: 0px;
+}
+
+
+/* 列表项间距控制 (List Item Spacing Control) */
+section li + li {
+    margin-top: 0 !important;
+}
+
+section ul > ul > li {
+    padding-top: 5px;
+    padding-bottom: 5px;
+}
+
+section ul li {
+    padding-left: calc(var(--spacing-unit) * 4);
+}
+
+section ul li p {
+    padding-left: calc(var(--spacing-unit) * 0);
+}
+
+/* ============================================================================
+   水平列表系统 (Horizontal List System)
+===========================================================================*/
+
+/* 水平列表容器 (Horizontal List Container) */
+.horizontal {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: center; /* 改为居中对齐 */
+    align-items: center; /* 垂直居中对齐 */
+}
+
+/* 水平容器中的直接图片支持 (Direct Image Support in Horizontal Container) */
+.horizontal > p > img {
+    max-height: 400px !important;
+    object-fit: contain;
+    flex-shrink: 0;
+}
+
+.horizontal > p {
+    margin: 0;
+    text-align: center;
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: center;
+    align-items: center;
+    gap: calc(var(--spacing-unit) * 3);
+    width: 100%;
+}
+
+.horizontal > p > img {
+    max-height: 200px;
+    object-fit: contain;
+    margin: 0;
+    flex-shrink: 0;
+}
+
+/* 移除 horizontal 容器中 p 标签里的换行符 */
+.horizontal > p > br {
+    display: none;
+}
+
+
+
+/* 水平列表容器内的ul */
+.horizontal ul {
+    display: flex;
+    flex-wrap: wrap;
+    gap: calc(var(--spacing-unit) * 3);
+    list-style: none;
+    justify-content: flex-start;
+    align-items: stretch;
+    width: 100%;
+}
+
+/* 水平列表项 (Horizontal List Items) */
+section .horizontal ul li,
+.horizontal ul li {
+    flex: 1 1 300px !important; /* 最小宽度300px，自适应增长 */
+    min-width: 300px !important;
+    max-width: 450px !important;
+    margin-bottom: 0 !important;
+    padding: calc(var(--spacing-unit) * 1) calc(var(--spacing-unit) * 1) !important;
+    box-shadow: var(--shadow-medium) !important;
+    position: relative !important;
+    border: 1px solid var(--card-border) !important;
+    cursor: pointer !important;
+    overflow: hidden !important;
+    text-align: center;
+}
+
+section .horizontal ul li p {
+    padding-left: 0px;
+}
+
+/* 水平列表项内容样式 (Horizontal List Item Content Styles) */
+
+.horizontal> ul > li
+/* .horizontal ul li p, */{
+    font-weight: 400 !important;
+    color: #956b59;
+    background: #fff;
+    box-shadow: 5px 5px black;
+    /* padding-left: calc(var(--spacing-unit) * 2) !important;
+    padding-right: 0 !important;
+    padding-top: calc(var(--spacing-unit) * 2) !important;
+    padding-bottom: 0 !important; */
+    margin-bottom: 0 !important;
+    line-height: 1.6 !important;
+}
+
+/* 水平列表中的嵌套列表项 (Nested List Items in Horizontal Lists) */
+section .horizontal ul ul li,
+.horizontal ul ul li {
+    border: none !important;
+    box-shadow: none !important;
+    padding: calc(var(--spacing-unit) * 0) calc(var(--spacing-unit) * 1) !important;
+}
+
+
+/* 移除水平列表里的大圆点 */
+.horizontal ul li::before {
+    display: none;
+}
+
+
+/* 响应式设计 (Responsive Design) */
+@media (max-width: 1200px) {
+    .horizontal ul li {
+        flex: 1 1 250px !important;
+        min-width: 250px !important;
+        max-width: 400px !important;
+    }
+}
+
+@media (max-width: 768px) {
+    .horizontal,
+    .horizontal ul {
+        flex-direction: column !important;
+    }
+    
+    .horizontal ul li {
+        flex: 1 1 auto !important;
+        min-width: auto !important;
+        max-width: none !important;
+    }
+}
+
+/* KaTeX 字体大小调整 (KaTeX Font Size Adjustment) */
+.katex {
+    font-size: 1.1em !important;
+    padding: 10px 0;
+}
+
+
+
+
+/* ============================================================================
+   6. 代码块系统 (Code Block System)
+   ===========================================================================*/
+
+
+
+/* 代码块容器 (Code Block Container) */
+marp-pre {
+    background: linear-gradient(135deg, var(--card-bg), var(--card-bg-secondary));
+    border: 1px solid var(--card-border);
+    border-radius: var(--border-radius);
+    box-shadow: var(--shadow-strong);
+    padding: calc(var(--spacing-unit) * 4);
+    backdrop-filter: blur(25px);
+    margin: calc(var(--spacing-unit) * 4) 0;
+    position: relative;
+    overflow: hidden;
+}
+
+/* 代码块装饰条 (Code Block Decoration Bar) */
+marp-pre::before {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    height: 3px;
+    background: linear-gradient(90deg, var(--gold), var(--rose), var(--iris));
+}
+
+/* ============================================================================
+   7. 特殊元素 (Special Elements)
+   ===========================================================================*/
+
+
+
+
+/* 引用块内容样式 (Blockquote Content Styles) */
+blockquote p, 
+blockquote p svg, 
+ul li blockquote p, 
+ul li blockquote p svg,
+blockquote ul li, 
+blockquote ul li svg, 
+blockquote ul li p, 
+.proof blockquote p {
+    color: #777;
+    font-style: italic;
+    background: transparent;
+    box-shadow: none;
+    padding: 0;
+}
+
+blockquote strong, 
+ul li blockquote strong, 
+blockquote p strong svg, 
+ul li blockquote p strong svg, 
+blockquote ul li p strong, 
+blockquote ul li p strong svg {
+    color: #AB886D;
+}
+
+/* 证明框 (Proof Boxes) */
+.proof, ul .proof {
+    background: linear-gradient(135deg, rgba(92, 184, 92, 0.1), rgba(92, 184, 92, 0.05));
+    padding: calc(var(--spacing-unit) * 2) calc(var(--spacing-unit) * 4);
+    border: 1px solid rgba(92, 184, 92, 0.2);
+    border-radius: var(--border-radius);
+    box-shadow: var(--shadow-medium);
+    margin: calc(var(--spacing-unit) * 2) 0;
+    position: relative;
+    backdrop-filter: blur(10px);
+}
+
+.proof p {
+    color: var(--text);
+    font-weight: 400;
+    font-size: 32px;
+    margin-bottom: 0;
+    background: transparent;
+    box-shadow: none;
+}
+
+
+/* 注释框 (Comment Boxes) */
+.proof.comment {
+    background: linear-gradient(135deg, rgba(152, 147, 165, 0.1), rgba(152, 147, 165, 0.05));
+    border-color: rgba(152, 147, 165, 0.2);
+}
+
+/* 引用块装饰引号 (Blockquote Decoration Quote) */
+.proof.comment::before {
+    content: '#';
+    position: absolute;
+    background-color: var(--base);
+    top: calc(var(--spacing-unit) * 2);
+    left: calc(var(--spacing-unit) * -1.5);
+    font-size: 50px;
+    color: var(--iris);
+    opacity: 0.2;
+    line-height: 1;
+    font-weight: 800;
+    transform: scaleX(1.2);
+}
+
+.proof::before {
+    content: '>';
+    position: absolute;
+    background-color: var(--base);
+    top: calc(var(--spacing-unit) * 1);
+    left: calc(var(--spacing-unit) * -2.5);
+    font-size: 64px;
+    color: var(--iris);
+    opacity: 0.2;
+    line-height: 1;
+    font-weight: 800;
+}
+
+
+
+
+/* 答案元素 (Answer Elements) */
+answer {
+    color: #ccc;
+    background: #ccc;
+    border-radius: var(--border-radius-small);
+    padding: 0 calc(var(--spacing-unit) * 2);
+    transition: all 0.4s cubic-bezier(0.4, 0, 0.2, 1);
+    cursor: pointer;
+    display: inline-block;
+    box-shadow: var(--shadow-subtle);
+    border: 1px solid transparent;
+}
+
+answer:hover {
+    background: #639a2f;
+    color:#fff;
+    box-shadow: var(--shadow-strong);
+    border-color: rgba(99, 154, 47, 0.3);
+}
+
+ul li answer svg, 
+ul li blockquote p answer svg {
+    color: var(--base);
+}
+
+/* ============================================================================
+   8. 表格系统 (Table System)
+   ===========================================================================*/
+
+table {
+    margin: calc(var(--spacing-unit) * 6) auto;
+    border-collapse: separate;
+    border-spacing: 0;
+    border-radius: var(--border-radius);
+    overflow: hidden;
+    box-shadow: var(--shadow-strong);
+    background: var(--card-bg);
+    border: 1px solid var(--card-border);
+    backdrop-filter: blur(20px);
+}
+
+th, td {
+    padding: calc(var(--spacing-unit) * 3) calc(var(--spacing-unit) * 4);
+    text-align: left;
+    border-bottom: 1px solid var(--highlight-high);
+}
+
+th {
+    background: var(--gold);
+    color: white;
+    font-weight: 700;
+    text-shadow: 0 1px 2px rgba(0, 0, 0, 0.1);
+}
+
+tr:hover {
+    background: var(--highlight-low);
+    transition: background 0.3s ease;
+}
+
+tr:last-child td {
+    border-bottom: none;
+}
+
+/* ============================================================================
+   9. 颜色标记系统 (Color Marking System)
+   ===========================================================================*/
+
+
+/* 红色标记 (Red Markers) */
+red, 
+red svg, 
+ul li strong red svg, 
+.proof red svg, 
+ul li blockquote p strong red svg {
+    color: var(--math-red);
+    border-color: #dddddd7c;
+}
+
+/* 绿色标记 (Green Markers) */
+green, 
+green svg, 
+ul li strong green svg, 
+.proof green svg, 
+ul li blockquote p strong green svg {
+    color: var(--math-green);
+}
+
+/* 橙色标记 (Orange Markers) */
+orange, 
+orange svg, 
+ul li strong orange svg, 
+.proof orange svg, 
+ul li blockquote p strong orange svg {
+    color: var(--math-orange);
+    background: rgba(223, 160, 75, 0.1);
+}
+
+/* 紫色标记 (Purple Markers) */
+purple, 
+purple svg, 
+ul li strong purple svg, 
+.proof purple svg, 
+ul li blockquote p strong purple svg {
+    color: var(--math-purple);
+    /* background: rgba(177, 137, 198, 0.1); */
+}
+
+/* 灰色标记 (Gray Markers) */
+gray, 
+gray svg, 
+ul li strong gray svg, 
+.proof gray svg, 
+ul li blockquote p strong gray svg {
+    color: var(--math-gray);
+    background: transparent;
+    border: none;
+    box-shadow: none;
+    padding: 0;
+}
+
+/* 蓝色标记 (Blue Markers) */
+blue, 
+blue svg, 
+ul li strong blue svg, 
+.proof blue svg, 
+ul li blockquote p strong blue svg {
+    color: var(--math-blue);
+    background: rgba(52, 112, 191, 0.1);
+}
+
+/* 黄色标记 (Yellow Markers) */
+yellow, 
+yellow svg, 
+ul li strong yellow svg, 
+.proof yellow svg, 
+ul li blockquote p strong yellow svg {
+    color: #8B7A00;
+    background: rgba(251, 233, 242, 0.3);
+    border-color: rgba(251, 233, 242, 0.5);
+}
+
+/* 白色标记 (White Markers) */
+white, 
+white svg, 
+ul li strong white svg, 
+.proof white svg, 
+ul li blockquote p strong white svg {
+    color: var(--math-white);
+    background: rgba(0, 0, 0, 0.1);
+    border-color: rgba(0, 0, 0, 0.2);
+}
+
+
+/* ============================================================================
+   11. 页面元素 (Page Elements)
+   ===========================================================================*/
+
+/* 页眉 (Header) */
+header {
+    color: var(--rose);
+    font-weight: 700;
+    border-radius: var(--border-radius-small);
+}
+
+/* 页脚 (Footer) */
+footer {
+    color: var(--muted);
+    font-style: italic;
+    padding: calc(var(--spacing-unit) * 0) calc(var(--spacing-unit) * 2);
+    border-radius: var(--border-radius-small);
+    box-shadow: var(--shadow-subtle);
+    opacity: 0.5;
+}
+
+/* 页码样式 (Page Number Styles) */
+section[data-marpit-pagination]::after {
+    bottom: calc(var(--spacing-unit) * 3) !important;
+    right: calc(var(--spacing-unit) * 4) !important;
+    top: auto !important;
+    left: auto !important;
+    position: absolute !important;
+    color: var(--muted);
+    font-size: 16px;
+    font-weight: 500;
+    background: rgba(255, 255, 255, 0.8);
+    padding: calc(var(--spacing-unit) / 2) var(--spacing-unit);
+    border-radius: var(--border-radius-small);
+    box-shadow: var(--shadow-subtle);
+}
+
+
+
+/* ============================================================================
+   10. CSS 动画系统 (CSS Animation System)
+===========================================================================*/
+
+
+reveal {
+    opacity: 1%;
+}
+
+reveal:hover {
+    opacity: 100%;
+    transition: 500ms;
+}
+
+
+circle {
+    fill: hotpink;
+    transition: r 500ms;
+}
+
+circle:hover {
+    r: 100px;
+}
