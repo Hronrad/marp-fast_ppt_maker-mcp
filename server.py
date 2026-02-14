@@ -1,22 +1,18 @@
 import os
 import sys
 import shutil
-import subprocess
+import asyncio
 import re
-import math
 from typing import Literal
 from mcp.server.fastmcp import FastMCP
+from playwright.async_api import async_playwright
 
-# 初始化
 mcp = FastMCP("Marp-PPT-Agent")
-max_chars_per_slide = 1200 # PPT 每页字符上限（可调整）
 
-# --- 1. 基础设施 ---
 def find_browser_path():
     paths = [
         "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
-        "/Applications/Microsoft Edge.app/Contents/MacOS/Microsoft Edge",
-        "/Applications/Brave Browser.app/Contents/MacOS/Brave Browser"
+        "/Applications/Microsoft Edge.app/Contents/MacOS/Microsoft Edge"
     ]
     for p in paths:
         if os.path.exists(p):
@@ -29,199 +25,252 @@ def find_marp_executable():
         return local_marp
     return shutil.which("marp")
 
-# --- 2. 核心算法：严格防溢出切分 (Strict Overflow Prevention) ---
-
-# --- 2. 核心算法：动态层级 + 视觉权重切分 ---
-
-def _get_target_heading_levels(text: str):
-    """
-    预扫描文本，找出文中存在的最高级和次高级标题。
-    返回一个集合，例如 {2, 3} 代表只在 ## 和 ### 处强制切分。
-    """
-    levels = set()
-    # 扫描文中所有的标题层级
-    for line in text.split('\n'):
-        # 匹配标准Markdown标题
-        match = re.match(r'^(#{1,6})\s', line)
-        if match:
-            levels.add(len(match.group(1)))
-    
-    if not levels:
-        return {1, 2} # 默认兜底
-
-    sorted_levels = sorted(list(levels))
-    
-    # 策略：只锁定最高级和次高级
-    # 例如：文中只有 H2, H3, H4 -> 锁定 {2, 3}，H4 不强制分页
-    target_levels = set(sorted_levels[:2])
-    
-    sys.stderr.write(f"DEBUG: 动态层级检测结果: H{target_levels}\n")
-    return target_levels
-
-
-class MarkdownSplitter:
-    def __init__(self, target_levels, max_cost=1200): 
-        self.new_lines = []
-        self.current_cost = 0
-        self.max_cost = max_cost
-        self.target_levels = target_levels
-        self.in_code_block = False
-        self.in_math_block = False 
-        self.page_count = 0
-        self.cost_log = []
+class EngineSplitter:
+    def __init__(self, slide_usable_height=620):
+        self.usable_height = slide_usable_height
         
-        self.img_pattern = re.compile(r'!\[.*?\]\(.*?\)') 
-        self.math_pattern = re.compile(r'\$\$') 
-        self.list_pattern = re.compile(r'^(\d+\.|-|\*)\s')
+    def _get_target_heading_levels(self, text: str):
+        import re
+        levels = set()
+        for line in text.split('\n'):
+            match = re.match(r'^(#{1,6})\s', line)
+            if match:
+                levels.add(len(match.group(1)))
+        if not levels:
+            return {1, 2}
+        return set(sorted(list(levels))[:2])
 
-    def _get_visual_cost(self, line: str) -> int:
-        s_line = line.strip()
-        if not s_line: return 50 
-        if self.img_pattern.search(line): return 320
-        if self.math_pattern.search(line): return 160
-        
-        header_match = re.match(r'^(#{1,6})\s', line)
-        if header_match:
-            level = len(header_match.group(1))
-            multiplier = 2.8 - 0.3 * level
-            cost = int(multiplier * math.ceil(len(s_line) / 12) * 50)
-            return cost
-
-        if self.list_pattern.match(line): return len(line) + 30
-        return len(line)
-
-    def safe_add_break(self):
-        while self.new_lines and self.new_lines[-1].strip() == "":
-            self.new_lines.pop()
-        
-        if self.new_lines and self.new_lines[-1].strip() == "---":
-            self.current_cost = 0
-            return 
-        
-        if self.current_cost <= 0:
-            return
-            
-        self.page_count += 1
-        log_msg = f"【page {self.page_count}】Cost: {self.current_cost}"
-        self.cost_log.append(log_msg)
-        sys.stderr.write(log_msg + "\n")
-        
-        self.new_lines.append("\n---\n\n")
-        self.current_cost = 0 
-
-    def _get_block_cost(self, lines, start_idx):
-        """前瞻计算整个代码块/公式块的总Cost"""
-        cost = 0
-        stripped_start = lines[start_idx].strip()
-        is_math = stripped_start == '$$'
-        is_code = stripped_start.startswith('```')
-        
-        for j in range(start_idx, len(lines)):
-            cost += self._get_visual_cost(lines[j])
-            if j > start_idx:
-                stripped_curr = lines[j].strip()
-                # 遇到闭合标签，停止前瞻
-                if is_math and stripped_curr == '$$':
-                    break
-                if is_code and stripped_curr.startswith('```'):
-                    break
-        return cost
-
-    def process(self, text):
+    def _safe_chunk_text(self, text: str):
+        """带智能层级追踪的切分算法"""
+        import re
         lines = text.split('\n')
+        chunks = []
+        current_chunk = []
+        current_context = []
+        list_hierarchy = {} # 记录当前激活的列表层级: {缩进量: 文本}
+        in_code = False
+        in_math = False
+        in_table = False
+        table_header = ""
+
+        def close_chunk():
+            nonlocal current_chunk, current_context
+            if current_chunk:
+                chunks.append({"type": "text", "text": "\n".join(current_chunk), "context": list(current_context), "header": None})
+                current_chunk = []
+
+        for line in lines:
+            stripped = line.strip()
+            if stripped.startswith('```'):
+                in_code = not in_code
+            if line.count('$$') % 2 != 0:
+                in_math = not in_math
+
+            if in_code or in_math:
+                if not current_chunk:
+                    current_context = [list_hierarchy[k] for k in sorted(list_hierarchy.keys())]
+                current_chunk.append(line)
+                continue
+
+            is_table_row = bool(re.match(r'^\|.*\|$', stripped))
+
+            if not in_table:
+                if is_table_row:
+                    current_chunk.append(line)
+                    if len(current_chunk) >= 2:
+                        prev = current_chunk[-2].strip()
+                        curr = current_chunk[-1].strip()
+                        if re.match(r'^\|.*\|$', prev) and re.match(r'^\|[\s\-\|:]+\|$', curr):
+                            in_table = True
+                            table_header = current_chunk[-2] + "\n" + current_chunk[-1]
+                            pre_table = current_chunk[:-2]
+                            current_chunk = []
+                            if pre_table:
+                                chunks.append({"type": "text", "text": "\n".join(pre_table), "context": list(current_context), "header": None})
+                            chunks.append({"type": "table_header", "text": table_header, "context": [], "header": table_header})
+                            list_hierarchy = {} # 进入表格，清除列表层级记忆
+                else:
+                    is_list_item = bool(re.match(r'^([ \t]*)([\-\*\+]|\d+\.)\s', line))
+                    is_heading = bool(re.match(r'^(#{1,6})\s', line))
+                    is_blank = (stripped == '')
+
+                    if is_blank:
+                        close_chunk()
+                    elif is_heading:
+                        close_chunk()
+                        list_hierarchy = {}
+                        current_context = []
+                        current_chunk = [line]
+                    elif is_list_item:
+                        close_chunk()
+                        match = re.match(r'^([ \t]*)([\-\*\+]|\d+\.)\s', line)
+                        indent = len(match.group(1).replace('\t', '    '))
+
+                        # 清除同级或更深层级的记忆，仅保留父级
+                        keys_to_remove = [k for k in list_hierarchy.keys() if k >= indent]
+                        for k in keys_to_remove:
+                            del list_hierarchy[k]
+
+                        current_context = [list_hierarchy[k] for k in sorted(list_hierarchy.keys())]
+                        list_hierarchy[indent] = line
+                        current_chunk = [line]
+                    else:
+                        match = re.match(r'^([ \t]+)', line)
+                        # 如果是无缩进的普通段落，说明列表已结束
+                        if not match and not current_chunk:
+                            list_hierarchy = {}
+                        if not current_chunk:
+                            current_context = [list_hierarchy[k] for k in sorted(list_hierarchy.keys())]
+                        current_chunk.append(line)
+            else:
+                if is_table_row:
+                    chunks.append({"type": "table_row", "text": line, "header": table_header, "context": []})
+                else:
+                    in_table = False
+                    table_header = ""
+                    list_hierarchy = {}
+                    if stripped != '':
+                        is_list_item = bool(re.match(r'^([ \t]*)([\-\*\+]|\d+\.)\s', line))
+                        is_heading = bool(re.match(r'^(#{1,6})\s', line))
+                        if is_list_item:
+                            match = re.match(r'^([ \t]*)([\-\*\+]|\d+\.)\s', line)
+                            indent = len(match.group(1).replace('\t', '    '))
+                            current_context = []
+                            list_hierarchy[indent] = line
+                            current_chunk = [line]
+                        elif is_heading:
+                            current_context = []
+                            current_chunk = [line]
+                        else:
+                            current_context = []
+                            current_chunk.append(line)
+
+        close_chunk()
+        return chunks
+
+    async def process(self, text: str, theme: str, marp_bin: str, env: dict):
+        import sys, os, asyncio, re
+        sys.stderr.write("DEBUG: [Two-Pass] 阶段1 - 构建探针 DOM...\n")
         
-        for i, line in enumerate(lines):
-            line_cost = self._get_visual_cost(line)
-            stripped_line = line.strip()
-            
-            # 检测是否即将进入代码块/公式块
-            starts_code = (not self.in_code_block) and stripped_line.startswith('```')
-            starts_math = (not self.in_math_block) and stripped_line == '$$'
-            
-            # --- 块级前瞻预判 (Block Lookahead) ---
-            if starts_code or starts_math:
-                block_cost = self._get_block_cost(lines, i)
-                # 如果加上整个块会溢出，立刻在块前面切分！
-                if (self.current_cost + block_cost) > self.max_cost and self.current_cost > 0:
-                    self.safe_add_break()
-            
-            # 1. 状态机：代码块保护
-            if stripped_line.startswith('```'):
-                self.in_code_block = not self.in_code_block
-                self.new_lines.append(line)
-                self.current_cost += line_cost
-                continue
-
-            # 2. 状态机：数学公式块保护
-            if stripped_line == '$$':
-                self.in_math_block = not self.in_math_block
-                self.new_lines.append(line)
-                self.current_cost += line_cost
-                continue
-
-            # 如果在代码块或公式块内部，绝对不切分，直接追加
-            if self.in_code_block or self.in_math_block:
-                self.new_lines.append(line)
-                self.current_cost += line_cost
-                continue
-
-            # --- 逻辑 A: 动态标题强制切分 ---
-            header_match = re.match(r'^(#{1,6})\s', line)
-            if header_match:
-                level = len(header_match.group(1))
-                if level in self.target_levels:
-                    if self.current_cost > 0 and i > 0: 
-                        self.safe_add_break()
-                    self.new_lines.append(line)
-                    self.current_cost += line_cost 
-                    continue
-
-            # --- 逻辑 B: 严格预判切分 ---
-            if (self.current_cost + line_cost) > self.max_cost:
-                if self.current_cost > 0:
-                    self.safe_add_break()
-                    self.new_lines.append(line)
-                    self.current_cost = line_cost
-                    continue
-            
-            self.new_lines.append(line)
-            self.current_cost += line_cost
-            
-        if self.current_cost > 0:
-            self.page_count += 1
-            log_msg = f"【page {self.page_count}】Cost: {self.current_cost}"
-            self.cost_log.append(log_msg)
-            sys.stderr.write(log_msg + "\n")
+        target_levels = self._get_target_heading_levels(text)
+        chunks = self._safe_chunk_text(text)
         
-        return "\n".join(self.new_lines)
+        probe_md_lines = [
+            "---",
+            "marp: true",
+            f"theme: {theme}",
+            "---",
+            "<style>section { height: auto !important; min-height: 720px !important; padding-bottom: 50px !important; }</style>\n"
+        ]
+        
+        for idx, chunk in enumerate(chunks):
+            c_type = chunk["type"]
+            c_text = chunk["text"]
+            probe = f'<div class="m-probe" data-idx="{idx}" style="height:0;margin:0;padding:0;visibility:hidden;"></div>'
+            
+            if c_type == "table_row":
+                last_pipe = c_text.rfind('|')
+                row = c_text[:last_pipe] + probe + c_text[last_pipe:] if last_pipe != -1 else c_text + probe
+                probe_md_lines.append(row)
+            elif c_type == "table_header":
+                lines = c_text.split('\n')
+                last_pipe = lines[0].rfind('|')
+                if last_pipe != -1:
+                    lines[0] = lines[0][:last_pipe] + probe + lines[0][last_pipe:]
+                probe_md_lines.append("\n".join(lines))
+            else:
+                probe_md_lines.append(c_text + f"\n{probe}\n")
+                
+        probe_md = "\n".join(probe_md_lines)
+        
+        base_dir = os.path.abspath(os.getcwd())
+        output_dir = os.path.join(base_dir, "output_slides")
+        os.makedirs(output_dir, exist_ok=True)
+        probe_md_file = os.path.join(output_dir, "probe_temp.md")
+        probe_html_file = os.path.join(output_dir, "probe_temp.html")
+        
+        with open(probe_md_file, "w", encoding="utf-8") as f:
+            f.write(probe_md)
+            
+        proc = await asyncio.create_subprocess_exec(
+            marp_bin, probe_md_file, "-o", probe_html_file, "--html", "--allow-local-files",
+            stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE, stdin=asyncio.subprocess.DEVNULL, env=env
+        )
+        await proc.communicate()
+        
+        sys.stderr.write("DEBUG: [Two-Pass] 阶段2 - Chromium 物理测距...\n")
+        from playwright.async_api import async_playwright
+        async with async_playwright() as p:
+            browser = await p.chromium.launch(headless=True, executable_path=env.get("CHROME_PATH"))
+            page = await browser.new_page()
+            await page.goto(f"file://{probe_html_file}")
+            await page.wait_for_timeout(1000) 
+            
+            js_code = """
+            () => {
+                const probes = Array.from(document.querySelectorAll('.m-probe'));
+                const rootTop = document.querySelector('section').getBoundingClientRect().top;
+                return probes.map(p => {
+                    const rect = p.getBoundingClientRect();
+                    return { idx: parseInt(p.dataset.idx), y: rect.bottom - rootTop };
+                });
+            }
+            """
+            probe_data = await page.evaluate(js_code)
+            await browser.close()
 
-def _smart_split_markdown(text: str):
-    # 0. 预检
-    if text.count('\n---') > 3:
-        return text, []
-    
-    # 1. 动态获取文档结构
-    target_levels = _get_target_heading_levels(text)
-    
-    # 2. 传入层级和权重阈值
-    splitter = MarkdownSplitter(target_levels=target_levels, max_cost=max_chars_per_slide)
-    result = splitter.process(text)
-    return result, splitter.cost_log
+        sys.stderr.write("DEBUG: [Two-Pass] 阶段3 - 物理边界与上下文智能注入...\n")
+        final_lines = []
+        current_page_baseline = 0
+        
+        for data in probe_data:
+            idx = data["idx"]
+            y_pos = data["y"]
+            chunk = chunks[idx]
+            
+            is_target_heading = False
+            if chunk["type"] == "text":
+                match = re.match(r'^(#{1,6})\s', chunk["text"])
+                if match and len(match.group(1)) in target_levels:
+                    is_target_heading = True
+            
+            is_overflow = (y_pos - current_page_baseline) > self.usable_height
+            is_first_on_page = (idx == 0) or (current_page_baseline == probe_data[idx-1]["y"])
+            
+            if is_overflow or (is_target_heading and not is_first_on_page):
+                if idx > 0:
+                    final_lines.append("\n---\n")
+                    current_page_baseline = probe_data[idx-1]["y"] 
+                    
+                    if chunk.get("type") == "table_row":
+                        final_lines.append(chunk["header"])
+                        
+                    # --- 核心修复：列表跨页智能注入父级上下文 ---
+                    if chunk.get("context"):
+                        for ctx_line in chunk["context"]:
+                            final_lines.append(ctx_line)
+                        
+            final_lines.append(chunk["text"])
 
-# --- 3. MCP 工具定义 ---
+        try:
+            os.remove(probe_md_file)
+            os.remove(probe_html_file)
+        except:
+            pass
+
+        return "\n".join(final_lines)
+    
+    
+# 核心修复4：将 MCP 接口设定为 async def
 @mcp.tool()
-def create_presentation(
+async def create_presentation(
     title: str,
     content: str,
     theme: Literal["default", "gaia", "uncover"] = "default",
     style_class: str = "lead",
     auto_split: bool = True 
 ) -> str:
-    """
-    将 Markdown 内容转换为 PPTX 和 PDF。
-    """
-    
-    # --- 环境检查 ---
+    """将 Markdown 内容转换为 PPTX 和 PDF。采用双重渲染确保物理高度精准。"""
     marp_bin = find_marp_executable()
     if not marp_bin:
         return "❌ 错误: 找不到 Marp。"
@@ -229,30 +278,39 @@ def create_presentation(
     if not browser_path:
         return "❌ 错误: 找不到浏览器。"
 
-# --- 逻辑层 ---
-    
-    # 核心修正2：在所有处理开始前，先剥离原始的 frontmatter
-    # 防止其自身的 '---' 触发分页，也防止其内容被算作第一页的 Cost
+    env = os.environ.copy()
+    env["CHROME_PATH"] = browser_path
+    env["PATH"] = "/usr/local/bin:/opt/homebrew/bin:" + env.get("PATH", "")
+
+    # --- 逻辑层 ---
     final_content = content.strip()
+    
+    # 1. 剥离可能自带的 Frontmatter
     if final_content.startswith('---'):
         parts = final_content.split('---', 2)
         if len(parts) >= 3:
             final_content = parts[2].strip()
 
-    # 在剥离头部后，再判断文中是否还有手动分页符
     has_manual_breaks = "\n---" in final_content
-    cost_log = []
     
     if auto_split or not has_manual_breaks:
-        sys.stderr.write("DEBUG: 启动智能切分..\n")
-        final_content, cost_log = _smart_split_markdown(final_content)
+        # 核心修正：强制清除文中所有已存在的 --- 分页符，避免干扰排版引擎
+        final_content = re.sub(r'^\s*---\s*$', '', final_content, flags=re.MULTILINE)
+        
+        # 自动规范化公式格式：将 \( \) 替换为 $ $，将 \[ \] 替换为 $$ $$
+        final_content = re.sub(r'\\\((.*?)\\\)', r'$\1$', final_content)
+        final_content = re.sub(r'\\\[(.*?)\\\]', r'$$\1$$', final_content, flags=re.DOTALL)
+        
+        # 删除多余的空白行（将3个以上的换行压缩为2个），保持排版紧密
+        final_content = re.sub(r'\n{3,}', '\n\n', final_content).strip()
+        
+        # 触发 Two-Pass 物理引擎
+        splitter = EngineSplitter(slide_usable_height=620)
+        final_content = await splitter.process(final_content, theme, marp_bin, env)
 
-    # 注入新的 Header
     header = f"---\nmarp: true\ntheme: {theme}\nclass: {style_class}\npaginate: true\n---\n\n"
     full_markdown = header + final_content
 
-
-    # --- IO层 ---
     base_dir = os.path.abspath(os.getcwd())
     output_dir = os.path.join(base_dir, "output_slides")
     os.makedirs(output_dir, exist_ok=True)
@@ -264,45 +322,35 @@ def create_presentation(
     with open(md_file, "w", encoding="utf-8") as f:
         f.write(full_markdown)
 
-    # --- 执行层 ---
-    env = os.environ.copy()
-    env["CHROME_PATH"] = browser_path
-    env["PATH"] = "/usr/local/bin:/opt/homebrew/bin:" + env.get("PATH", "")
-
     results = []
     
-    def run_marp(output_path, format_flag):
+    # 核心修复6：使用纯异步的方式调用最终生成命令
+    async def run_marp_async(output_path, format_flag):
         cmd = [marp_bin, md_file, "-o", output_path, "--allow-local-files"]
         try:
-            subprocess.run(
-                cmd,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE,
-                stdin=subprocess.DEVNULL,
-                env=env,
-                text=True,
-                check=True,
-                timeout=120
+            proc = await asyncio.create_subprocess_exec(
+                *cmd,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+                stdin=asyncio.subprocess.DEVNULL,
+                env=env
             )
+            stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=120)
+            if proc.returncode != 0:
+                return False, stderr.decode()
             return True, None
+        except asyncio.TimeoutError:
+            return False, "命令执行超时"
         except Exception as e:
-            err_msg = e.stderr if isinstance(e, subprocess.CalledProcessError) else str(e)
-            return False, err_msg
+            return False, str(e)
 
-    # 1. PPTX
-    ok, err = run_marp(pptx_file, "PPTX")
+    ok, err = await run_marp_async(pptx_file, "PPTX")
     results.append(f"✅ PPTX: {pptx_file}" if ok else f"❌ PPTX 失败: {err}")
 
-    # 2. PDF
-    ok, err = run_marp(pdf_file, "PDF")
+    ok, err = await run_marp_async(pdf_file, "PDF")
     results.append(f"✅ PDF:  {pdf_file}" if ok else f"❌ PDF 失败: {err}")
 
-    # 3. 添加 cost 信息到结果
-    final_result = "\n".join(results)
-    if cost_log:
-        final_result += "\n\n📊 转换详情:\n" + "\n".join(cost_log)
-    
-    return final_result
+    return "\n".join(results)
 
 if __name__ == "__main__":
     mcp.run()
