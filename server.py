@@ -3,14 +3,13 @@ import sys
 import shutil
 import asyncio
 import re
-from typing import Literal
 from mcp.server.fastmcp import FastMCP
 from playwright.async_api import async_playwright
 
 mcp = FastMCP("Marp-fast PPT maker-Agent")
 
 def find_browser_path():
-    """跨平台浏览器路径探测"""
+    """Cross-platform browser path detection."""
     if sys.platform == "win32":
         paths = [
             os.path.expandvars(r"%ProgramFiles%\Google\Chrome\Application\chrome.exe"),
@@ -24,7 +23,7 @@ def find_browser_path():
             "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
             "/Applications/Microsoft Edge.app/Contents/MacOS/Microsoft Edge"
         ]
-    else:  # Linux 及其他
+    else:  # Linux and others
         paths = [
             "/usr/bin/google-chrome",
             "/usr/bin/google-chrome-stable",
@@ -38,9 +37,9 @@ def find_browser_path():
     return None
 
 def find_marp_executable():
-    """跨平台 Marp 执行文件探测"""
+    """Cross-platform Marp executable detection."""
     local_marp_dir = os.path.abspath(os.path.join(os.getcwd(), "node_modules", ".bin"))
-    # shutil.which 会在 Windows 下自动补全 .cmd/.exe 后缀
+    # shutil.which auto-adds .cmd/.exe on Windows
     local_marp = shutil.which("marp", path=local_marp_dir)
     if local_marp:
         return local_marp
@@ -50,35 +49,43 @@ class EngineSplitter:
     def __init__(self, slide_usable_height=620):
         self.usable_height = slide_usable_height
         
-    def _get_target_heading_levels(self, text: str):
-        import re
-        levels = set()
-        for line in text.split('\n'):
-            match = re.match(r'^(#{1,6})\s', line)
-            if match:
-                levels.add(len(match.group(1)))
-        if not levels:
-            return {1, 2}
-        return set(sorted(list(levels))[:2])
+    def _get_target_heading_levels(self, text: str, split_levels: int):
+            levels = set()
+            for line in text.split('\n'):
+                match = re.match(r'^(#{1,6})\s', line)
+                if match:
+                    levels.add(len(match.group(1)))
+            if not levels:
+                return {1, 2}
+            # Core change: use split_levels for top-N heading levels
+            return set(sorted(list(levels))[:split_levels])
 
     def _safe_chunk_text(self, text: str):
-        """带智能层级追踪的切分算法"""
-        import re
         lines = text.split('\n')
         chunks = []
         current_chunk = []
         current_context = []
-        list_hierarchy = {} # 记录当前激活的列表层级: {缩进量: 文本}
+        list_hierarchy = {}
         in_code = False
         in_math = False
         in_table = False
         table_header = ""
+        
+        # Core fix: remember blank-line state before a chunk
+        pending_blank = False
 
-        def close_chunk():
-            nonlocal current_chunk, current_context
+        def close_chunk(force_type="text", header=None):
+            nonlocal current_chunk, current_context, pending_blank
             if current_chunk:
-                chunks.append({"type": "text", "text": "\n".join(current_chunk), "context": list(current_context), "header": None})
+                chunks.append({
+                    "type": force_type, 
+                    "text": "\n".join(current_chunk), 
+                    "context": list(current_context), 
+                    "header": header,
+                    "blank_before": pending_blank
+                })
                 current_chunk = []
+                pending_blank = False
 
         for line in lines:
             stripped = line.strip()
@@ -107,9 +114,23 @@ class EngineSplitter:
                             pre_table = current_chunk[:-2]
                             current_chunk = []
                             if pre_table:
-                                chunks.append({"type": "text", "text": "\n".join(pre_table), "context": list(current_context), "header": None})
-                            chunks.append({"type": "table_header", "text": table_header, "context": [], "header": table_header})
-                            list_hierarchy = {} # 进入表格，清除列表层级记忆
+                                chunks.append({
+                                    "type": "text", 
+                                    "text": "\n".join(pre_table), 
+                                    "context": list(current_context), 
+                                    "header": None,
+                                    "blank_before": pending_blank
+                                })
+                                pending_blank = False
+                            chunks.append({
+                                "type": "table_header", 
+                                "text": table_header, 
+                                "context": [], 
+                                "header": table_header,
+                                "blank_before": pending_blank
+                            })
+                            pending_blank = False
+                            list_hierarchy = {}
                 else:
                     is_list_item = bool(re.match(r'^([ \t]*)([\-\*\+]|\d+\.)\s', line))
                     is_heading = bool(re.match(r'^(#{1,6})\s', line))
@@ -117,6 +138,8 @@ class EngineSplitter:
 
                     if is_blank:
                         close_chunk()
+                        # Record blank-line state for the next chunk to claim
+                        pending_blank = True
                     elif is_heading:
                         close_chunk()
                         list_hierarchy = {}
@@ -127,7 +150,6 @@ class EngineSplitter:
                         match = re.match(r'^([ \t]*)([\-\*\+]|\d+\.)\s', line)
                         indent = len(match.group(1).replace('\t', '    '))
 
-                        # 清除同级或更深层级的记忆，仅保留父级
                         keys_to_remove = [k for k in list_hierarchy.keys() if k >= indent]
                         for k in keys_to_remove:
                             del list_hierarchy[k]
@@ -137,7 +159,6 @@ class EngineSplitter:
                         current_chunk = [line]
                     else:
                         match = re.match(r'^([ \t]+)', line)
-                        # 如果是无缩进的普通段落，说明列表已结束
                         if not match and not current_chunk:
                             list_hierarchy = {}
                         if not current_chunk:
@@ -145,7 +166,13 @@ class EngineSplitter:
                         current_chunk.append(line)
             else:
                 if is_table_row:
-                    chunks.append({"type": "table_row", "text": line, "header": table_header, "context": []})
+                    chunks.append({
+                        "type": "table_row", 
+                        "text": line, 
+                        "header": table_header, 
+                        "context": [],
+                        "blank_before": False
+                    })
                 else:
                     in_table = False
                     table_header = ""
@@ -165,15 +192,16 @@ class EngineSplitter:
                         else:
                             current_context = []
                             current_chunk.append(line)
+                    else:
+                        pending_blank = True
 
         close_chunk()
         return chunks
 
-    async def process(self, text: str, theme: str, marp_bin: str, env: dict):
-        import sys, os, asyncio, re
-        sys.stderr.write("DEBUG: [Two-Pass] 阶段1 - 构建探针 DOM...\n")
+    async def process(self, text: str, theme: str, marp_bin: str, env: dict, heading_split_levels: int = 2):
+        sys.stderr.write("DEBUG: [Two-Pass] Phase 1 - Build probe DOM...\n")
         
-        target_levels = self._get_target_heading_levels(text)
+        target_levels = self._get_target_heading_levels(text, heading_split_levels)
         chunks = self._safe_chunk_text(text)
         
         probe_md_lines = [
@@ -181,13 +209,17 @@ class EngineSplitter:
             "marp: true",
             f"theme: {theme}",
             "---",
-            "<style>section { height: auto !important; min-height: 720px !important; padding-bottom: 50px !important; }</style>\n"
+            "<style>section { height: auto !important; overflow: visible !important; }</style>\n"
         ]
         
         for idx, chunk in enumerate(chunks):
+            # Core fix: restore paragraph spacing when rebuilding the DOM
+            if chunk.get("blank_before") and idx > 0:
+                probe_md_lines.append("") 
+                
             c_type = chunk["type"]
             c_text = chunk["text"]
-            probe = f'<div class="m-probe" data-idx="{idx}" style="height:0;margin:0;padding:0;visibility:hidden;"></div>'
+            probe = f'<span class="m-probe" data-idx="{idx}" style="font-size:0; line-height:0; margin:0; padding:0; visibility:hidden;"></span>'
             
             if c_type == "table_row":
                 last_pipe = c_text.rfind('|')
@@ -200,7 +232,10 @@ class EngineSplitter:
                     lines[0] = lines[0][:last_pipe] + probe + lines[0][last_pipe:]
                 probe_md_lines.append("\n".join(lines))
             else:
-                probe_md_lines.append(c_text + f"\n{probe}\n")
+                if c_text.strip().endswith('```') or c_text.strip().endswith('$$'):
+                    probe_md_lines.append(c_text + f"\n{probe}\n")
+                else:
+                    probe_md_lines.append(c_text + probe)
                 
         probe_md = "\n".join(probe_md_lines)
         
@@ -213,21 +248,18 @@ class EngineSplitter:
         with open(probe_md_file, "w", encoding="utf-8") as f:
             f.write(probe_md)
             
-            # 构建基础命令
         cmd = [marp_bin, probe_md_file, "-o", probe_html_file, "--html", "--allow-local-files"]
-        
-        # 核心修改：挂载本地 themes 文件夹
         themes_dir = os.path.join(base_dir, "themes")
         if os.path.exists(themes_dir):
             cmd.extend(["--theme-set", themes_dir])
 
         proc = await asyncio.create_subprocess_exec(
-            *cmd,  # 使用解包传入命令数组
+            *cmd,
             stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE, stdin=asyncio.subprocess.DEVNULL, env=env
         )
         await proc.communicate()
         
-        sys.stderr.write("DEBUG: [Two-Pass] 阶段2 - Chromium 物理测距...\n")
+        sys.stderr.write("DEBUG: [Two-Pass] Phase 2 - Chromium physical measurement...\n")
 
         async with async_playwright() as p:
             browser = await p.chromium.launch(headless=True, executable_path=env.get("CHROME_PATH"))
@@ -237,18 +269,44 @@ class EngineSplitter:
             
             js_code = """
             () => {
+                const section = document.querySelector('section');
+                const style = window.getComputedStyle(section);
+                const pt = parseFloat(style.paddingTop) || 0;
+                const pb = parseFloat(style.paddingBottom) || 0;
+                const usableHeight = 720 - pt - pb;
+
                 const probes = Array.from(document.querySelectorAll('.m-probe'));
-                const rootTop = document.querySelector('section').getBoundingClientRect().top;
-                return probes.map(p => {
-                    const rect = p.getBoundingClientRect();
-                    return { idx: parseInt(p.dataset.idx), y: rect.bottom - rootTop };
-                });
+                const contentTop = section.getBoundingClientRect().top + pt;
+
+                return {
+                    usableHeight: usableHeight,
+                    probes: probes.map(p => {
+                        let target = p.parentElement;
+                        const blockTags = ['li', 'p', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'tr', 'div', 'blockquote', 'pre'];
+                        while (target && !blockTags.includes(target.tagName.toLowerCase()) && target.tagName.toLowerCase() !== 'section') {
+                            target = target.parentElement;
+                        }
+                        if (!target || target.tagName.toLowerCase() === 'section') {
+                            target = p.parentElement || p;
+                        }
+                        
+                        const rect = target.getBoundingClientRect();
+                        const tStyle = window.getComputedStyle(target);
+                        const mb = parseFloat(tStyle.marginBottom) || 0;
+                        
+                        return { idx: parseInt(p.dataset.idx), y: rect.bottom + mb - contentTop };
+                    })
+                };
             }
             """
-            probe_data = await page.evaluate(js_code)
+            result = await page.evaluate(js_code)
             await browser.close()
 
-        sys.stderr.write("DEBUG: [Two-Pass] 阶段3 - 物理边界与上下文智能注入...\n")
+        usable_height = result["usableHeight"]
+        probe_data = result["probes"]
+        safe_usable_height = usable_height - 30
+
+        sys.stderr.write("DEBUG: [Two-Pass] Phase 3 - Physical boundary measurement...\n")
         final_lines = []
         current_page_baseline = 0
         
@@ -259,14 +317,14 @@ class EngineSplitter:
             
             is_target_heading = False
             if chunk["type"] == "text":
-                match = re.match(r'^(#{1,6})\s', chunk["text"])
+                match = re.match(r'^ {0,3}(#{1,6})\s', chunk["text"])
                 if match and len(match.group(1)) in target_levels:
                     is_target_heading = True
             
-            is_overflow = (y_pos - current_page_baseline) > self.usable_height
+            is_overflow = (y_pos - current_page_baseline) > safe_usable_height
             is_first_on_page = (idx == 0) or (current_page_baseline == probe_data[idx-1]["y"])
             
-            if is_overflow or (is_target_heading and not is_first_on_page):
+            if (is_overflow or is_target_heading) and not is_first_on_page:
                 if idx > 0:
                     final_lines.append("\n---\n")
                     current_page_baseline = probe_data[idx-1]["y"] 
@@ -274,10 +332,13 @@ class EngineSplitter:
                     if chunk.get("type") == "table_row":
                         final_lines.append(chunk["header"])
                         
-                    # --- 核心修复：列表跨页智能注入父级上下文 ---
                     if chunk.get("context"):
                         for ctx_line in chunk["context"]:
                             final_lines.append(ctx_line)
+            else:
+                # Core fix: preserve blank paragraph spacing when no page break
+                if chunk.get("blank_before") and len(final_lines) > 0 and final_lines[-1] != "\n---\n":
+                    final_lines.append("")
                         
             final_lines.append(chunk["text"])
 
@@ -288,7 +349,6 @@ class EngineSplitter:
             pass
 
         return "\n".join(final_lines)
-    
 
 @mcp.tool()
 async def create_presentation(
@@ -296,43 +356,60 @@ async def create_presentation(
     content: str,
     theme: str = "default",
     style_class: str = "",
-    auto_split: bool = True 
+    auto_split: bool = True,
+    generate_pptx: bool = True,
+    heading_split_levels: int = 2
 ) -> str:
     """
-    一键将文档转为 ppt 展示的绝佳工具。自动为 Markdown 内容添加分隔符，并通过 Marp 转为 PPTX 和 PDF。采用双重渲染确保物理高度精准，智能精确切分以获得最佳的阅读体验。非常适合需要快速从文本生成专业演示文稿的用户，涵盖小组汇报、学术报告、内容分享等场景。
-    
-    【LLM 模板选择指南】请严格根据用户提供的内容主题，自动为 theme 参数选择最合适的选项：
-    - "default": 小字体，基础简洁白底黑字，兼容性最好。
-    - "gaia": 中等字体，带有暖色调和自然气息，对比度低。建议用于：人文社科、艺术设计、环保生态、生活方式类轻松主题。
-    - "uncover": 超大字体，极简主义，对比度高，视觉冲击力强。建议用于：产品发布会、TED式个人演讲、创意Pitch、大图为主的视觉展示。
-    - "academic": 中等字体，红色标题。需注意其为右对齐，仅当特定条件下使用。
-    - "beam": 小字体，仿 Latex 中的 Beamer 主题，适合学术类内容，但需注意其对长标题和复杂元素的兼容性较差。
-    - "rose-pine-dawn": 小字体，浅色背景，淡雅富有美感，适合科技人文多种领域。
-    - "rose-pine-moon": 小字体，暗色背景，神秘优雅，适合需要暗色背景展示的情形。
-    - "rose-pine-dawn-modern": 中等字体，在 rose-pine-dawn 的基础上增加了现代化元素的卡片式标题展示。
+    One-click tool to convert Markdown into PPT-style slides. It auto-splits content and
+    uses Marp to generate PPTX and PDF. The two-pass rendering engine ensures accurate
+    physical layout and smart splitting for better readability. Ideal for fast generation
+    of professional decks such as team reports, academic talks, or content sharing.
 
-    【style_class 参数说明】请根据用户的内容展示需求，选择是否填入特定的 style_class 来调整整体风格：
-    - "": 默认风格，无需额外样式类，适合大多数
-    - "lead": 类似 uncover 的居中标题排版。
-    - "invert": 反转色彩，适合需要暗色背景的展示。
+    Parameters:
+    - generate_pptx: Whether to generate the PPTX file. Default is True.
+
+    [LLM Theme Guide] Choose the best theme based on the content:
+    - "default": Small font, clean black-on-white, best compatibility.
+    - "gaia": Medium font, warm tone, low contrast. Good for humanities, art/design,
+        eco/lifestyle topics.
+    - "uncover": Large font, minimalist, high contrast. Good for product launches,
+        TED-style talks, creative pitches, and image-heavy decks.
+    - "academic": Medium font with red titles. Note: right-aligned; use only when needed.
+    - "beam": Small font, Beamer-like. Good for academic content, but less compatible
+        with long titles and complex elements.
+    - "rose-pine-dawn": Small font, light background, gentle style.
+    - "rose-pine-moon": Small font, dark background, elegant for dark themes.
+    - "rose-pine-dawn-modern": Medium font, adds a modern card-style title on top of
+        rose-pine-dawn.
+
+    [style_class Guide] Optional class to tweak layout:
+    - "": Default style, suitable for most cases.
+    - "lead": Centered title layout similar to uncover.
+    - "invert": Inverted colors for dark presentations.
+
+    [heading_split_levels Guide] Controls heading-driven page breaks (default: 2):
+    - 2 (default): The top two heading levels (e.g., H1 and H2) trigger new pages.
+    - 1: Only the top-level headings (e.g., H1) trigger page breaks.
+    - 3 or more: For very deep documents where each subsection is long.
     """
     marp_bin = find_marp_executable()
     if not marp_bin:
-        return "❌ 错误: 找不到 Marp。"
+        return "❌ Error: Marp not found."
     browser_path = find_browser_path()
     if not browser_path:
-        return "❌ 错误: 找不到浏览器。"
+        return "❌ Error: Browser not found."
 
     env = os.environ.copy()
     env["CHROME_PATH"] = browser_path
-    # 仅在非 Windows 系统下追加特定的 bin 目录，防止破坏 Windows 的 PATH 结构
+    # Only append extra bins on non-Windows to avoid breaking PATH
     if sys.platform != "win32":
         env["PATH"] = "/usr/local/bin:/opt/homebrew/bin:" + env.get("PATH", "")
 
-    # --- 逻辑层 ---
+    # --- Logic ---
     final_content = content.strip()
     
-    # 1. 剥离可能自带的 Frontmatter
+    # 1. Strip any existing frontmatter
     if final_content.startswith('---'):
         parts = final_content.split('---', 2)
         if len(parts) >= 3:
@@ -341,19 +418,21 @@ async def create_presentation(
     has_manual_breaks = "\n---" in final_content
     
     if auto_split or not has_manual_breaks:
-        # 核心修正：强制清除文中所有已存在的 --- 分页符，避免干扰排版引擎
+        # Remove any existing page breaks
         final_content = re.sub(r'^\s*---\s*$', '', final_content, flags=re.MULTILINE)
         
-        # 自动规范化公式格式：将 \( \) 替换为 $ $，将 \[ \] 替换为 $$ $$
+        # Core fix: ensure a blank line before headings to avoid block parsing stickiness
+        final_content = re.sub(r'([^\n])\n( {0,3}#{1,6}\s)', r'\1\n\n\2', final_content)
+        
+        # Normalize math syntax
         final_content = re.sub(r'\\\((.*?)\\\)', r'$\1$', final_content)
         final_content = re.sub(r'\\\[(.*?)\\\]', r'$$\1$$', final_content, flags=re.DOTALL)
         
-        # 删除多余的空白行（将3个以上的换行压缩为2个），保持排版紧密
         final_content = re.sub(r'\n{3,}', '\n\n', final_content).strip()
         
-        # 触发 Two-Pass 物理引擎
+        # Run the two-pass engine with dynamic heading split levels
         splitter = EngineSplitter(slide_usable_height=620)
-        final_content = await splitter.process(final_content, theme, marp_bin, env)
+        final_content = await splitter.process(final_content, theme, marp_bin, env, heading_split_levels)
 
     header = f"---\nmarp: true\ntheme: {theme}\nclass: {style_class}\npaginate: true\n---\n\n"
     full_markdown = header + final_content
@@ -371,7 +450,7 @@ async def create_presentation(
 
     results = []
     
-    # 核心修复6：使用纯异步的方式调用最终生成命令
+    # Use async subprocess for final generation
     async def run_marp_async(output_path, format_flag):
         cmd = [marp_bin, md_file, "-o", output_path, "--allow-local-files"]
 
@@ -392,15 +471,16 @@ async def create_presentation(
                 return False, stderr.decode()
             return True, None
         except asyncio.TimeoutError:
-            return False, "命令执行超时"
+            return False, "Command timed out"
         except Exception as e:
             return False, str(e)
 
-    ok, err = await run_marp_async(pptx_file, "PPTX")
-    results.append(f"✅ PPTX: {pptx_file}" if ok else f"❌ PPTX 失败: {err}")
+    if generate_pptx:
+        ok, err = await run_marp_async(pptx_file, "PPTX")
+        results.append(f"✅ PPTX: {pptx_file}" if ok else f"❌ PPTX failed: {err}")
 
     ok, err = await run_marp_async(pdf_file, "PDF")
-    results.append(f"✅ PDF:  {pdf_file}" if ok else f"❌ PDF 失败: {err}")
+    results.append(f"✅ PDF:  {pdf_file}" if ok else f"❌ PDF failed: {err}")
 
     return "\n".join(results)
 
